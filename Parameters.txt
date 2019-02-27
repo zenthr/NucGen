@@ -1,0 +1,25 @@
+Order Calcd: 2
+Events Calcd: 150
+Nucl Model : 1
+====================
+Nucleonic Information
+Collision Type: 1-> Pb-Pb
+Energy Scale Factor: 87
+Radius of Nucleons : 0.5
+Gaus Profile Radius: 0.5
+====================
+Step Size  : 0.02
+Array Size : 1201
+Array Half : 600 (should be above-1/2)
+ImpactPrm b: 6
+Value of g : 0.5
+IR Cutoff m: 1.01 fm^-1
+           : 0.199475 GeV
+Grain Molds: 1201 (# of modes kept on either end)
+UV Cutoff Q: 314.159 fm^-1 (from grain, array size and step size)
+           : 62.0465 GeV
+Sat.ScaleQs: 2.90918e+016 fm^-1 (from grain, array size and step size)
+           : 5.74562e+015 GeV
+Eta Slices : 10
+Gluon Types: 8
+Color Types: 3
