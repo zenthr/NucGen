@@ -1,7 +1,7 @@
 //Array
 #define ARRAY 1201 // (hCG/h)*(nCG-1)+1
 #define HALF 600
-#define OFF  26
+#define OFF  200
 #define MOLDARRAY 2001
 #define MOLDHALF 1000
 #define MOLDRANGE 1000
@@ -19,7 +19,7 @@
 #define Order 2
 
 
-const int N = 150; //Iterations for corelations
+const int N = 3; //Iterations for corelations
 
 //CDF Limits
 const double RhoMax = 5.0;

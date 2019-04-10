@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <complex>
 #include <cmath>
+#include <fftw3.h>
 #include <typeinfo> //Not sure what this does
 
 #include "CGCEDefsHD-FFTW.h"
@@ -63,6 +64,7 @@ using namespace std;
     double EBsq[100][4];
     double RhoStep;
     double***** CovPot;
+    static double*** AlphaCor;
 
 
       static double**** MuShapeCenter;
@@ -206,9 +208,61 @@ double ran() {std::uniform_real_distribution<double> uniran(0.0,1.0); return uni
       }
       delete [] RhoCG;
    }
+   
+   //Definition for static double AlphaCor[2][ARRAY][ARRAY]
+   //<alpha-alpha> correlation
+   
+   void DeclAlphaCor()
+   {
+      AlphaCor = new double**[2];
+      for(int nuc=0; nuc<2; nuc++)
+      {
+         AlphaCor[nuc] = new double*[ARRAY];
+         
+         for(int x=0; x<ARRAY; x++)
+         {
+            AlphaCor[nuc][x] = new double[ARRAY];
+
+            for(int y=0; y<ARRAY; y++)
+            {
+               AlphaCor[nuc][x][y] = 0;
+            }
+         }
+      }
+   }
+
+   void RelAlphaCor()
+   {
+      for(int nuc=0; nuc=2; nuc++)
+      {
+         for(int x=0; x<ARRAY; x++)
+         {
+            delete [] AlphaCor[nuc][x];
+         }
+         delete [] AlphaCor[nuc];
+      }
+      delete [] AlphaCor;
+   }
     /**********/
     /*End Decl*/
     /**********/
+
+    void WSIntegration ()
+    {
+       for(int x = 0; x<ARRAY; x++)
+       {
+           for(int y = 0; y<ARRAY; y++)
+           {
+              double WSInt = 0;
+              for(int z=0; z<ARRAY*10; z++)
+              {
+                 WSInt = WSInt + NuclDens*(h/10)/(1+exp((sqrt((x-HALF)*(x-HALF)+(y-HALF)*(y-HALF)+z*z/100)*h-WSr)/WSa));
+              }
+              MuShape[0][x][y]=WSInt*2.;
+              MuShape[1][x][y]=WSInt*2.;
+           }
+       }
+    }
 
     void NucSampler ()
     {
@@ -376,8 +430,10 @@ double ran() {std::uniform_real_distribution<double> uniran(0.0,1.0); return uni
        
        timer=time(0);
 
+       DeclAlphaCor();
+
        ofstream RhoPrint;
-        cout << "start!";
+
        srand(time(0));
 
        RhoStep = 2*RhoMax/(NUMSTEP-1);
@@ -388,7 +444,32 @@ double ran() {std::uniform_real_distribution<double> uniran(0.0,1.0); return uni
 
        for(int n=0; n<N; n++)
        {
+       if(NucMethod == 0)
+       {
+          WSIntegration();
+       }
+       
+       if(NucMethod == 1)
+       {
           NucSampler();
+       }
+
+       if(NucMethod == 2)
+       {
+          for(int nuc=0;nuc<2;nuc++)
+          {
+          for(int x=0;x<ARRAY;x++)
+          {
+          for(int y=0;y<ARRAY;y++)
+          {
+          MuShape[nuc][x][y]=mu;
+          }
+          }
+          }
+       }
+       
+       DeclCovPot();
+
           cout << "Sample'd: " << endl;
           cout << "Runtime : " << time(0) - timer << endl;
           cout << "Event No: " << n << endl;
@@ -397,7 +478,8 @@ double ran() {std::uniform_real_distribution<double> uniran(0.0,1.0); return uni
        for(int eta=0; eta<etamax; eta++)
        {
 
-/*
+/*** The Rho Sampler ***/
+
        DeclRho();
 
        for(int x = 0; x<ARRAY; x++)
@@ -447,13 +529,129 @@ double ran() {std::uniform_real_distribution<double> uniran(0.0,1.0); return uni
            }//close y loop
        }//close x loop
 
+   /*** Solving Poisson ***/
+
+
+       for(int col = 0; col<8; col++)
+       {
+          cout << "Potential for nuc = " << nuc << endl;
+
+          if(nuc==0 && col==0 && eta==0)
+          {
+              for(int x = 0; x<ARRAY; x++)
+              {
+                 for(int y = 0; y<ARRAY; y++)
+                 {
+                    CovPot[nuc][col][eta][x][y] = 0.; //to be safe
+                 }
+              }
+          }
+          
+          
+          
+          fftw_complex *rhoalpha; //Will contain rho(x), rho(k), alpha(k), alpha(x)
+          fftw_plan p, q; //Is how FFTW knows what to do
+
+
+          rhoalpha = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * ARRAY*ARRAY); // This is a linear list of ARRAY*ARRAY size- it's what FFTW expects
+
+
+          for(int i=0; i<ARRAY; i++) //real part
+          {
+             for(int j=0; j<ARRAY; j++) // imaginary part
+             {
+                rhoalpha[i*ARRAY + j][0] = RhoCG[nuc][col][eta][i][j]; //rho(x)
+                rhoalpha[i*ARRAY + j][1] = 0;
+             }
+          }
+
+
+          p = fftw_plan_dft_2d(ARRAY, ARRAY, rhoalpha, rhoalpha, FFTW_FORWARD, FFTW_ESTIMATE); //Forward transformation, overwriting rhoalpha
+          q = fftw_plan_dft_2d(ARRAY, ARRAY, rhoalpha, rhoalpha, FFTW_BACKWARD, FFTW_ESTIMATE); //Backward transformation, overwriting rhoalpha
+
+
+
+          fftw_execute(p); //rhoalpha -> rho(k) - It's just that easy!
+
+          double mterm = mIR*mIR*h*h; //Mass term
+                    
+          for(int i=0; i<ARRAY; i++) //rhoalpha -> alpha(k)
+          {
+             double ki = 2*PIE*(min(i,ARRAY-i))/(ARRAY);
+              for(int j=0; j<ARRAY; j++)
+             {
+
+                if( i<=FFTWGrain || ARRAY-i <=FFTWGrain )
+                {
+                   if( j<=FFTWGrain || ARRAY-j <=FFTWGrain )
+                   {
+                      double kj = 2*PIE*(min(j,ARRAY-j))/(ARRAY);
+                      rhoalpha[i*ARRAY + j][0] = rhoalpha[i*ARRAY + j][0]/(ki*ki + kj*kj + mterm);
+                      rhoalpha[i*ARRAY + j][1] = rhoalpha[i*ARRAY + j][1]/(ki*ki + kj*kj + mterm);
+		        
+                      if(i==j && j==0 && true)
+                      {
+		                 rhoalpha[i*ARRAY + j][0] = 0;
+		                 rhoalpha[i*ARRAY + j][1] = 0;
+		              }
+                   }
+                   else
+                   {
+                      rhoalpha[i*ARRAY + j][0] = 0;
+                      rhoalpha[i*ARRAY + j][1] = 0;
+                   }
+                }
+                else
+                {
+                   rhoalpha[i*ARRAY + j][0] = 0;
+                   rhoalpha[i*ARRAY + j][1] = 0;
+                }
+             }
+          }
+
+          fftw_execute(q); //rhoalpha -> alpha(x)
+
+
+          for(int i=0; i<ARRAY; i++)
+          {
+             for(int j=0; j<ARRAY; j++)
+             {
+                CovPot[nuc][col][eta][i][j] = rhoalpha[i*ARRAY + j][0]/(ARRAY*ARRAY); //Forward then backward transform is renormalized
+             }
+          }
+
+          fftw_free(rhoalpha); // Discard variable
+          
+          fftw_destroy_plan(p); // Discard plans
+          fftw_destroy_plan(q);
+}//end col loop
+
+/*** This is what my correlation calculations look like ***/
+
+          for(int x = 0; x<ARRAY; x++)
+          {
+             for(int y = 0; y<ARRAY; y++)
+             {
+                for(int col = 0; col<1; col++)
+                {
+                   AlphaCor[0][x][y] = AlphaCor[0][x][y] + CovPot[nuc][col][eta][x][y]*CovPot[nuc][col][eta][HALF][HALF];
+//                   AlphaCor[1][x][y] = AlphaCor[1][x][y] + CovPot[nuc][col][eta][x][y]*CovPot[nuc][col][eta][(HALF/2)][(HALF/2)];
+                   AlphaCor[1][x][y] = AlphaCor[1][x][y] + CovPot[nuc][col][eta][x][y];
+//                   AlphaAv[0][x][y] = AlphaAv[0][x][y] + CovPot[nuc][col][eta][x][y];
+//                   AlphaAv[1][x][y] = AlphaAv[1][x][y] + CovPot[nuc][col][eta][x][y]*CovPot[nuc][col][eta][x][y];
+                }
+             }
+          }
+
+
+
+
 RelRho();
-*/
-
-
           } //end eta loop
           } //end nuc loop
 
+if(NucMethod == 1)
+{
    for(int i=0; i<3; i++)
    {
       delete [] Nucl1[i];
@@ -461,6 +659,7 @@ RelRho();
    }
    delete [] Nucl1;
    delete [] Nucl2;
+}
 
             } //CLOSES N ITERATIONS
 
@@ -485,6 +684,22 @@ cout << "Out of N" << endl;
          PrintMu[1][0] << endl;
          PrintMu[1][1] << endl;
       }
+      
+      ofstream PrintAlphaCor[2];
+      PrintAlphaCor[0].open("AlphaCorCent.txt");
+      PrintAlphaCor[1].open("AlphaCorOff.txt");
+
+       for(int x = 0; x<ARRAY; x++)
+       {
+          for(int y = 0; y<ARRAY; y++)
+          {             
+             PrintAlphaCor[0] << AlphaCor[0][x][y] << "  ";
+             PrintAlphaCor[1] << AlphaCor[1][x][y] << "  ";
+          }
+          PrintAlphaCor[0] << endl;
+          PrintAlphaCor[1] << endl;
+       }
+       
        
 cout << "All writted!" << endl;
 
